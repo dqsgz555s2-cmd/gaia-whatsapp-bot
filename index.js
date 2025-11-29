@@ -1,119 +1,101 @@
+// ======================================================
+// GAIA - WhatsApp Bot Tikalia
+// ======================================================
+
 const express = require("express");
 const axios = require("axios");
 const app = express();
 
 app.use(express.json());
 
-/* ----------------------------------------------------
+/* ======================================================
    CONFIG
----------------------------------------------------- */
-const VERIFY_TOKEN = "12345";   // token di verifica webhook
-const PAGE_ACCESS_TOKEN = 
-"EAAWBrN9qWiwBQJuoaG9CuL4te6LCrQMlMmZBR1Xdx4RYs1pitn9LIZCaevYTsCu7sW3loEGrkwiu6fqjZBb9mXhL2WryJomPkYiVMjCH8Q5QRY79J7ea6OxPyXv82dN5NjCIjg96pLO8v2ZBZBdRqQzqfxev6kCziXBzZCpZA1k7ZAtBZBFGzIsIrelrly6t9j2hY1MCD9PXWzdZBGNg4sh0DJYs5uRBzWggSstg9EXGHF4bVO39So13L6DKsyY1kVCuhNdr4EbO6uOmfTYdEN6wZDZD";
+====================================================== */
 
-/* ----------------------------------------------------
-   AI RISPOSTA - GAIA
----------------------------------------------------- */
-async function gaiaRisposta(testomsg, nome) {
+const VERIFY_TOKEN = "12345";  // Token per verificare il webhook
+const PAGE_ACCESS_TOKEN = process.env.WHATSAPP_TOKEN;
 
-  return `
-Buonasera ${nome},  
-sono **GAIA**, l’assistente intelligente di **Tikalia**.
+/* ======================================================
+   RISPOSTA DI GAIA
+====================================================== */
 
-📌 Ho ricevuto il tuo messaggio:  
-“${testomsg}”
+async function gaiaRisposta(testo, nome) {
+    return `
+Buonasera ${nome},
+sono GAIA, l’assistente intelligente di Tikalia.
 
-Siamo alla ricerca costante di **immobili in vendita e in acquisto**, sia **residenziali** che **commerciali**, per soddisfare la 
-domanda crescente dei nostri clienti — inclusi progetti di rilievo nel territorio di Cagliari e hinterland.
-
-Se desideri:
-• valutare la vendita o locazione del tuo immobile  
-• ricevere una stima professionale  
-• proporre un immobile di un amico/parente  
-• oppure fissare un appuntamento con un consulente Tikalia  
-
-sono qui per aiutarti subito.
-
-Puoi dirmi liberamente di cosa hai bisogno ✨  
-  `.trim();
+Ho ricevuto il tuo messaggio:
+"${testo}"
+`;
 }
 
-/* ----------------------------------------------------
-   INVIO MESSAGGIO WHATSAPP
----------------------------------------------------- */
-async function sendMessage(to, text) {
-  try {
-    await axios({
-      method: "POST",
-      url: "https://graph.facebook.com/v18.0/893079007217754/messages",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${PAGE_ACCESS_TOKEN}`
-      },
-      data: {
-        messaging_product: "whatsapp",
-        to: to,
-        type: "text",
-        text: { body: text }
-      }
-    });
+/* ======================================================
+   WEBHOOK GET (validazione con Meta)
+====================================================== */
 
-    console.log("✔️ Risposta inviata");
-  } catch (err) {
-    console.log("❌ Errore invio risposta:", err.response?.data || err);
-  }
-}
-
-/* ----------------------------------------------------
-   WEBHOOK GET (Verifica Meta)
----------------------------------------------------- */
 app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("Webhook verificato ✔️");
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
-  }
+    if (mode && token === VERIFY_TOKEN) {
+        return res.status(200).send(challenge);
+    } else {
+        return res.sendStatus(403);
+    }
 });
 
-/* ----------------------------------------------------
-   WEBHOOK POST (Messaggi WhatsApp)
----------------------------------------------------- */
+/* ======================================================
+   WEBHOOK POST (ricezione messaggi WhatsApp)
+====================================================== */
+
 app.post("/webhook", async (req, res) => {
-  console.log("📩 Messaggio ricevuto:");
-  console.log(JSON.stringify(req.body, null, 2));
+    try {
+        const body = req.body;
 
-  res.sendStatus(200);
+        if (
+            body.object &&
+            body.entry &&
+            body.entry[0].changes &&
+            body.entry[0].changes[0].value.messages
+        ) {
+            const msg = body.entry[0].changes[0].value.messages[0];
+            const from = msg.from;
+            const testo = msg.text?.body || "Messaggio ricevuto";
 
-  try {
-    const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const message = changes?.value?.messages?.[0];
+            const nome = from; // In futuro potremo mettere il nome vero
+            const risposta = await gaiaRisposta(testo, nome);
 
-    if (!message) return;
+            // TODO: sostituisci PHONE_NUMBER_ID con il tuo ID numerico WhatsApp
+            await axios.post(
+                "https://graph.facebook.com/v20.0/PHONE_NUMBER_ID/messages",
+                {
+                    messaging_product: "whatsapp",
+                    to: from,
+                    text: { body: risposta }
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${PAGE_ACCESS_TOKEN}`,
+                        "Content-Type": "application/json"
+                    }
+                }
+            );
+        }
 
-    const from = message.from;
-    const text = message.text?.body || "";
-    const nome = changes?.value?.contacts?.[0]?.profile?.name || "gentile utente";
-
-    //  GAIA CREA RISPOSTA
-    const risposta = await gaiaRisposta(text, nome);
-
-    //  INVIO
-    await sendMessage(from, risposta);
-
-  } catch (err) {
-    console.log("Errore gestione messaggio:", err);
-  }
+        res.sendStatus(200);
+    } catch (err) {
+        console.error("Errore Webhook:", err.message);
+        res.sendStatus(500);
+    }
 });
 
-/* ----------------------------------------------------
-   SERVER
----------------------------------------------------- */
-app.listen(3000, () => {
-  console.log("🚀 GAIA ABCDE ATTIVA sulla porta 3000");
+/* ======================================================
+   AVVIO SERVER - COMPATIBILE RENDER
+====================================================== */
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`🚀 GAIA ABCDE ATTIVA sulla porta ${PORT}`);
 });
