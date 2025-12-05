@@ -1,6 +1,7 @@
 {
   "name": "gaia-whatsapp-bot",
   "version": "1.0.0",
+  "description": "GAIA - WhatsApp bot Tikalia su Render",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
