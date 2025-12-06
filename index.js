@@ -1,5 +1,5 @@
 // ======================================================
-// GAIA - WhatsApp Bot Tikalia (versione per Render + Meta)
+// GAIA - WhatsApp Bot Tikalia (Render + Meta STABLE)
 // ======================================================
 const express = require("express");
 const axios = require("axios");
@@ -10,12 +10,12 @@ app.use(express.json());
 // ------------------------------------------------------
 // CONFIG
 // ------------------------------------------------------
-const VERIFY_TOKEN = "gaia_12345";               // Deve coincidere con il token inserito su Meta
-const PAGE_ACCESS_TOKEN = process.env.WHATSAPP_TOKEN; // Inserito su Render come env var
-const PHONE_NUMBER_ID = "893079007217754";      // ID numero WhatsApp Business
+const VERIFY_TOKEN = "gaia_12345"; // Deve coincidere con Meta
+const PAGE_ACCESS_TOKEN = process.env.WHATSAPP_TOKEN;
+const PHONE_NUMBER_ID = "893079007217754";
 
 // ------------------------------------------------------
-// RISPOSTA DI GAIA (base)
+// RISPOSTA DI GAIA (BASE)
 // ------------------------------------------------------
 async function gaiaRisposta(testo, nome) {
   return `Buongiorno ${nome},
@@ -40,59 +40,63 @@ app.get("/webhook", (req, res) => {
     console.log("✔️ Webhook verificato da Meta");
     return res.status(200).send(challenge);
   } else {
-    console.log("❌ Verifica webhook fallita: token o mode non validi");
+    console.log("❌ Verifica webhook fallita");
     return res.sendStatus(403);
   }
 });
 
 // ------------------------------------------------------
-// WEBHOOK POST (MESSAGGI WHATSAPP IN ARRIVO)
+// WEBHOOK POST (MESSAGGI IN ARRIVO)
 // ------------------------------------------------------
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", (req, res) => {
+  // ✅ rispondi immediatamente a Meta
+  res.sendStatus(200);
+
   try {
     const body = req.body;
 
     if (
-      body.object &&
-      body.entry &&
-      body.entry[0].changes &&
-      body.entry[0].changes[0].value.messages
-    ) {
-      const change = body.entry[0].changes[0].value;
-      const msg = change.messages[0];
-      const from = msg.from;
-      const testo = msg.text?.body || "";
-      const nome = change.contacts?.[0]?.profile?.name || "utente";
+      body.object !== "whatsapp_business_account" ||
+      !body.entry?.[0]?.changes?.[0]?.value?.messages
+    ) return;
 
-      const risposta = await gaiaRisposta(testo, nome);
+    const value = body.entry[0].changes[0].value;
+    const msg = value.messages[0];
+    if (msg.type !== "text") return;
 
-      await axios.post(
-        `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
-        {
-          messaging_product: "whatsapp",
-          to: from,
-          text: { body: risposta }
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${PAGE_ACCESS_TOKEN}`,
-            "Content-Type": "application/json"
+    const from = msg.from;
+    const testo = msg.text.body;
+    const nome = value.contacts?.[0]?.profile?.name || "utente";
+
+    gaiaRisposta(testo, nome).then(async (risposta) => {
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
+          {
+            messaging_product: "whatsapp",
+            to: from,
+            text: { body: risposta }
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${PAGE_ACCESS_TOKEN}`,
+              "Content-Type": "application/json"
+            }
           }
-        }
-      );
+        );
+        console.log("✔️ Messaggio inviato a", from);
+      } catch (err) {
+        console.error("❌ Errore invio:", err.response?.data || err.message);
+      }
+    });
 
-      console.log("✔️ Messaggio inviato a", from);
-    }
-
-    res.sendStatus(200);
   } catch (err) {
-    console.error("❌ Errore Webhook:", err.response?.data || err.message || err);
-    res.sendStatus(500);
+    console.error("❌ Errore Webhook:", err.message);
   }
 });
 
 // ------------------------------------------------------
-// SERVER COMPATIBILE RENDER
+// AVVIO SERVER (RENDER)
 // ------------------------------------------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
